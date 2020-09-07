@@ -1,7 +1,23 @@
+import argparse
+import shlex
+
 import discord
 from discord.ext import commands
 
 from params import Roles, Webhooks, Channels
+
+
+class InteractiveArgumentParser(argparse.ArgumentParser):
+  def exit(self, status=0, message=None):
+    if message:
+      self._print_message(message)
+
+  def error(self, message):
+    self.exit(message=f'error: {message}\n{self.format_usage()}')
+
+  def _print_message(self, message, file=None):
+    if message:
+      raise commands.ArgumentParsingError(message)
 
 
 class Staff(commands.Cog):
@@ -13,6 +29,14 @@ class Staff(commands.Cog):
     self.required_roles = Roles.helpers
     self.logger_webhook = Webhooks.moderation
     self.management_channel = Channels.management
+
+    p = InteractiveArgumentParser(prog='$ban')
+    p.add_argument('user', type=int, help='user ID')
+    p.add_argument('-r', '--reason', default='none')
+    p.add_argument(
+        '-d', '--delete_history', type=int, choices=range(0, 2), default=0
+    )
+    self.ban_parser = p
 
   @commands.Cog.listener()
   async def on_ready(self):
@@ -48,11 +72,12 @@ class Staff(commands.Cog):
 
   @commands.command()
   async def staff(self, ctx):
+    """Toggle the @staff role."""
     if not self.in_management(ctx):
       raise commands.CheckFailure('Invalid channel', self.management_channel.id)
 
     logentry = discord.Embed(
-        title='enabled staff',
+        description=f'{ctx.author.mention} enabled staff',
         timestamp=ctx.message.created_at,
         colour=discord.Colour.green()
     )
@@ -62,12 +87,57 @@ class Staff(commands.Cog):
       if role.id == self.staff_role.id:
         await ctx.author.remove_roles(role)
 
-        logentry.title = 'disabled staff'
+        logentry.description = f'{ctx.author.mention} disabled staff'
         logentry.colour = discord.Colour.orange()
       else:
         await ctx.author.add_roles(self.staff_role)
 
     return await self.logger_webhook.send(embed=logentry)
+
+  @commands.group()
+  async def user(self, ctx):
+    """User commands."""
+    pass
+
+  @user.command(name='ban', aliases=['banir'])
+  @commands.cooldown(rate=6, per=3600, type=commands.BucketType.member)
+  async def user_ban(self, ctx, *, cmd: shlex.split = ''):
+    """Ban a user. Use `$user ban --help` for details."""
+    if not self.in_management(ctx):
+      raise commands.CheckFailure('Invalid channel', self.management_channel.id)
+
+    args = self.ban_parser.parse_known_intermixed_args(cmd)[0]
+
+    try:
+      user = await commands.MemberConverter().convert(ctx, str(args.user))
+    except Exception:
+      user = discord.Object(args.user)
+
+    reason = f'[{ctx.author}] “{args.reason}”'
+
+    logentry = discord.Embed(
+        timestamp=ctx.message.created_at,
+        colour=discord.Colour.orange(),
+        description=f'{ctx.author.mention} banned ({user}) for “{args.reason}”'
+    )
+    logentry.set_author(name=ctx.author, icon_url=ctx.author.avatar_url)
+
+    await ctx.guild.ban(
+        user, reason=reason, delete_message_days=args.delete_history
+    )
+
+    return await self.logger_webhook.send(embed=logentry)
+
+  @user_ban.error
+  async def user_ban_err(self, ctx, err):
+    if not self.in_management(ctx):
+      return
+
+    if isinstance(err, commands.MissingAnyRole) \
+      or isinstance(err, commands.MissingPermissions):
+      return await ctx.send(f'`Unauthorised`', delete_after=30)
+
+    await ctx.send(f'```bash\n{err}```', delete_after=30)
 
 
 def setup(bot):
