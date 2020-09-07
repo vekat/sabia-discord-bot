@@ -89,8 +89,9 @@ class Staff(commands.Cog):
 
         logentry.description = f'{ctx.author.mention} disabled staff'
         logentry.colour = discord.Colour.orange()
-      else:
-        await ctx.author.add_roles(self.staff_role)
+        break
+    else:
+      await ctx.author.add_roles(self.staff_role)
 
     return await self.logger_webhook.send(embed=logentry)
 
@@ -106,7 +107,7 @@ class Staff(commands.Cog):
     if not self.in_management(ctx):
       raise commands.CheckFailure('Invalid channel', self.management_channel.id)
 
-    args = self.ban_parser.parse_known_intermixed_args(cmd)[0]
+    args = self.ban_parser.parse_known_args(cmd)[0]
 
     try:
       user = await commands.MemberConverter().convert(ctx, str(args.user))
