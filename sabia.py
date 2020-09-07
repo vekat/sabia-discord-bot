@@ -21,8 +21,10 @@ class Sabia(Bot):
         raise Exception('Invalid guild')
 
   async def on_command_error(self, ctx, err):
-    if isinstance(err, discord.ext.commands.CommandNotFound
-                 ) or isinstance(err, discord.ext.commands.CheckFailure):
+    if isinstance(err, discord.ext.commands.CommandNotFound) \
+      or isinstance(err, discord.ext.commands.CheckFailure) \
+      or isinstance(err, discord.ext.commands.CommandOnCooldown) \
+      or isinstance(err, discord.ext.commands.ArgumentParsingError):
       return
 
     print('→ command error:', err)
