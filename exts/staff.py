@@ -34,7 +34,7 @@ class Staff(commands.Cog):
     self.dialect_roles = Roles.group_dialect
     self.enabled_roles = Roles.group_dialect + Roles.group_proficiency + Roles.group_normal
 
-    p = InteractiveArgumentParser(prog='$ban')
+    p = InteractiveArgumentParser(prog='$user ban')
     p.add_argument('user', type=int, help='user ID')
     p.add_argument('-r', '--reason', default='no reason')
     p.add_argument(
@@ -42,7 +42,7 @@ class Staff(commands.Cog):
     )
     self.ban_parser = p
 
-    p = InteractiveArgumentParser(prog='$role')
+    p = InteractiveArgumentParser(prog='$user role')
     p.add_argument('user', type=str, help='user')
     p.add_argument('role', type=str, help='role')
     p.add_argument('-r', '--reason', default='no reason')
