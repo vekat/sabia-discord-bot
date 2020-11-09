@@ -73,8 +73,6 @@ class Staff(commands.Cog):
   @commands.command()
   async def staff(self, ctx):
     """Toggle the @staff role."""
-    if not self.in_management(ctx):
-      raise commands.CheckFailure('Invalid channel', self.management_channel.id)
 
     logentry = discord.Embed(
         description=f'{ctx.author.mention} enabled staff',
@@ -104,8 +102,6 @@ class Staff(commands.Cog):
   @commands.cooldown(rate=6, per=3600, type=commands.BucketType.member)
   async def user_ban(self, ctx, *, cmd: shlex.split = ''):
     """Ban a user. Use `$user ban --help` for details."""
-    if not self.in_management(ctx):
-      raise commands.CheckFailure('Invalid channel', self.management_channel.id)
 
     args = self.ban_parser.parse_known_args(cmd)[0]
 
@@ -131,14 +127,15 @@ class Staff(commands.Cog):
 
   @user_ban.error
   async def user_ban_err(self, ctx, err):
+    channel = ctx.channel
     if not self.in_management(ctx):
-      return
+      channel = self.management_channel
 
     if isinstance(err, commands.MissingAnyRole) \
       or isinstance(err, commands.MissingPermissions):
-      return await ctx.send(f'`Unauthorised`', delete_after=30)
+      return
 
-    await ctx.send(f'```bash\n{err}```', delete_after=30)
+    return await channel.send(f'{ctx.author.mention}\n```bash\n{err}```')
 
 
 def setup(bot):
