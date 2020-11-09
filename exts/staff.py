@@ -30,13 +30,23 @@ class Staff(commands.Cog):
     self.logger_webhook = Webhooks.moderation
     self.management_channel = Channels.management
 
+    self.proficiency_roles = Roles.group_proficiency
+    self.dialect_roles = Roles.group_dialect
+    self.enabled_roles = Roles.group_dialect + Roles.group_proficiency + Roles.group_normal
+
     p = InteractiveArgumentParser(prog='$ban')
     p.add_argument('user', type=int, help='user ID')
-    p.add_argument('-r', '--reason', default='none')
+    p.add_argument('-r', '--reason', default='no reason')
     p.add_argument(
         '-d', '--delete_history', type=int, choices=range(0, 2), default=0
     )
     self.ban_parser = p
+
+    p = InteractiveArgumentParser(prog='$role')
+    p.add_argument('user', type=str, help='user')
+    p.add_argument('role', type=str, help='role')
+    p.add_argument('-r', '--reason', default='no reason')
+    self.role_parser = p
 
   @commands.Cog.listener()
   async def on_ready(self):
@@ -93,7 +103,7 @@ class Staff(commands.Cog):
 
     return await self.logger_webhook.send(embed=logentry)
 
-  @commands.group()
+  @commands.group(aliases=['u'])
   async def user(self, ctx):
     """User commands."""
     pass
@@ -107,7 +117,7 @@ class Staff(commands.Cog):
 
     try:
       user = await commands.MemberConverter().convert(ctx, str(args.user))
-    except Exception:
+    except:
       user = discord.Object(args.user)
 
     reason = f'[{ctx.author}] “{args.reason}”'
@@ -127,6 +137,73 @@ class Staff(commands.Cog):
 
   @user_ban.error
   async def user_ban_err(self, ctx, err):
+    channel = ctx.channel
+    if not self.in_management(ctx):
+      channel = self.management_channel
+
+    if isinstance(err, commands.MissingAnyRole) \
+      or isinstance(err, commands.MissingPermissions):
+      return
+
+    return await channel.send(f'{ctx.author.mention}\n```bash\n{err}```')
+
+  @user.command(name='role', aliases=['cargo'])
+  @commands.cooldown(rate=24, per=3600, type=commands.BucketType.member)
+  async def user_role(self, ctx, *, cmd: shlex.split = ''):
+    """Gives a role. Use `$user role --help` for details."""
+    args = self.role_parser.parse_known_args(cmd)[0]
+
+    try:
+      user = await commands.MemberConverter().convert(ctx, str(args.user))
+    except Exception as err:
+      raise commands.ArgumentParsingError(
+          f'Invalid member ({args.user}): {err}'
+      )
+
+    try:
+      role = await commands.RoleConverter().convert(ctx, str(args.role))
+    except Exception as err:
+      raise commands.ArgumentParsingError(f'Invalid role ({args.role}): {err}')
+
+    if role.id not in self.enabled_roles:
+      raise commands.ArgumentParsingError(f'Invalid role {role} ({args.role})')
+
+    reason = f'[{ctx.author}] “{args.reason}”'
+
+    logentry = discord.Embed(
+        timestamp=ctx.message.created_at, colour=discord.Colour.green()
+    )
+    logentry.set_author(name=ctx.author, icon_url=ctx.author.avatar_url)
+
+    roles_to_add = []
+    roles_to_remove = []
+    roles_action = 'added'
+
+    for user_role in user.roles:
+      if user_role.id == role.id:
+        roles_action = 'removed'
+        roles_to_remove.append(role)
+        logentry.colour = discord.Colour.orange()
+        break
+    else:
+      roles_to_add.append(role)
+      if role.id in self.proficiency_roles:
+        for user_role in user.roles:
+          if user_role.id in self.proficiency_roles:
+            roles_to_remove.append(user_role)
+
+    logentry.description = f'{ctx.author.mention} {roles_action} role ({user}, {role}) “{args.reason}”'
+
+    if roles_to_add:
+      await user.add_roles(*roles_to_add, reason=reason)
+
+    if roles_to_remove:
+      await user.remove_roles(*roles_to_remove, reason=reason)
+
+    return await self.logger_webhook.send(embed=logentry)
+
+  @user_role.error
+  async def user_role_err(self, ctx, err):
     channel = ctx.channel
     if not self.in_management(ctx):
       channel = self.management_channel
