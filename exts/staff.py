@@ -7,6 +7,28 @@ from discord.ext import commands
 from params import Roles, Webhooks, Channels
 
 
+class BasicHelpCommand(commands.MinimalHelpCommand):
+  def get_destination(self):
+    if self.cog is None:
+      return super().get_destination()
+
+    return self.cog.management_channel
+
+  async def send_group_help(self, group):
+    if self.cog is None or group.name not in self.cog.parsers:
+      return await super().send_group_help(group)
+
+    return await self.send_command_help(group)
+
+  async def send_command_help(self, command):
+    if self.cog is None or command.name not in self.cog.parsers:
+      return await super().send_command_help(command)
+
+    help_text = self.cog.parsers[command.name].format_help()
+    destination = self.get_destination()
+    await destination.send(f'```bash\n{help_text}```')
+
+
 class InteractiveArgumentParser(argparse.ArgumentParser):
   def exit(self, status=0, message=None):
     if message:
@@ -34,19 +56,44 @@ class Staff(commands.Cog):
     self.dialect_roles = Roles.group_dialect
     self.enabled_roles = Roles.group_dialect + Roles.group_proficiency + Roles.group_normal
 
-    p = InteractiveArgumentParser(prog='$user ban')
-    p.add_argument('user', type=int, help='user ID')
-    p.add_argument('-r', '--reason', default='no reason')
-    p.add_argument(
-        '-d', '--delete_history', type=int, choices=range(0, 2), default=0
+    self._help_command = bot.help_command
+    bot.help_command = BasicHelpCommand(
+        commands_heading='commands',
+        aliases_heading='aliases',
+        no_category='no category'
     )
-    self.ban_parser = p
+    bot.help_command.cog = self
 
-    p = InteractiveArgumentParser(prog='$user role')
-    p.add_argument('user', type=str, help='user')
-    p.add_argument('role', type=str, help='role')
-    p.add_argument('-r', '--reason', default='no reason')
-    self.role_parser = p
+    self.setup_parser()
+
+  def setup_parser(self):
+    self.parsers = {}
+
+    user = InteractiveArgumentParser(prog=self.bot.command_prefix + 'user')
+    self.parsers['user'] = user
+
+    subparsers = user.add_subparsers(
+        title='subcommands', help='subcommand name', required=True
+    )
+
+    action_parser = InteractiveArgumentParser(add_help=False)
+    action_parser.add_argument('-r', '--reason')
+
+    ban = subparsers.add_parser(
+        'ban', help='ban a user', parents=[action_parser]
+    )
+    ban.add_argument('users', type=int, nargs='+', help='user IDs')
+    ban.add_argument(
+        '-d', '--delete-history', type=int, choices=range(0, 2), default=0
+    )
+    self.parsers['ban'] = ban
+
+    role = subparsers.add_parser(
+        'role', help='toggle a role', parents=[action_parser]
+    )
+    role.add_argument('user', type=str, help='user ID, username or tag')
+    role.add_argument('role', type=str, help='role ID or name')
+    self.parsers['role'] = role
 
   @commands.Cog.listener()
   async def on_ready(self):
@@ -76,13 +123,17 @@ class Staff(commands.Cog):
 
     raise commands.MissingAnyRole(self.required_roles)
 
+  async def cog_before_invoke(self, ctx):
+    if ctx.command and ctx.command.name in self.parsers:
+      ctx.parser = self.parsers[ctx.command.name]
+
   async def cog_after_invoke(self, ctx):
     if not self.in_management(ctx):
       return await ctx.message.delete()
 
   @commands.command()
   async def staff(self, ctx):
-    """Toggle the @staff role."""
+    """Toggle the `@staff` role."""
 
     logentry = discord.Embed(
         description=f'{ctx.author.mention} enabled staff',
@@ -111,29 +162,38 @@ class Staff(commands.Cog):
   @user.command(name='ban', aliases=['banir'])
   @commands.cooldown(rate=6, per=3600, type=commands.BucketType.member)
   async def user_ban(self, ctx, *, cmd: shlex.split = ''):
-    """Ban a user. Use `$user ban --help` for details."""
+    """Ban users."""
+    args = ctx.parser.parse_known_args(cmd)[0]
 
-    args = self.ban_parser.parse_known_args(cmd)[0]
-
-    try:
-      user = await commands.MemberConverter().convert(ctx, str(args.user))
-    except:
-      user = discord.Object(args.user)
+    users = []
+    for user_id in args.users:
+      try:
+        u = await commands.UserConverter().convert(ctx, str(user_id))
+      except:
+        u = discord.Object(user_id)
+      finally:
+        if u:
+          users.append(u)
 
     reason = f'[{ctx.author}] “{args.reason}”'
 
     logentry = discord.Embed(
         timestamp=ctx.message.created_at,
         colour=discord.Colour.orange(),
-        description=f'{ctx.author.mention} banned ({user}) for “{args.reason}”'
     )
     logentry.set_author(name=ctx.author, icon_url=ctx.author.avatar_url)
 
-    await ctx.guild.ban(
-        user, reason=reason, delete_message_days=args.delete_history
-    )
-
-    return await self.logger_webhook.send(embed=logentry)
+    for user in users:
+      try:
+        await ctx.guild.ban(
+            user, reason=reason, delete_message_days=args.delete_history
+        )
+        logentry.description = f'{ctx.author.mention} banned ({user}) for “{args.reason}”'
+        await self.logger_webhook.send(embed=logentry)
+      except Exception as err:
+        await self.management_channel.send(
+            f'```bash\nfailed to ban ({user}): {err}```'
+        )
 
   @user_ban.error
   async def user_ban_err(self, ctx, err):
@@ -150,8 +210,8 @@ class Staff(commands.Cog):
   @user.command(name='role', aliases=['cargo'])
   @commands.cooldown(rate=24, per=3600, type=commands.BucketType.member)
   async def user_role(self, ctx, *, cmd: shlex.split = ''):
-    """Gives a role. Use `$user role --help` for details."""
-    args = self.role_parser.parse_known_args(cmd)[0]
+    """Give a role."""
+    args = ctx.parser.parse_known_args(cmd)[0]
 
     try:
       user = await commands.MemberConverter().convert(ctx, str(args.user))
@@ -213,6 +273,9 @@ class Staff(commands.Cog):
       return
 
     return await channel.send(f'{ctx.author.mention}\n```bash\n{err}```')
+
+  def cog_unload(self):
+    self.bot.help_command = self._help_command
 
 
 def setup(bot):
