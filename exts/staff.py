@@ -49,6 +49,8 @@ class Staff(commands.Cog):
 
     self.staff_role = Roles.staff
     self.required_roles = Roles.helpers
+    self.default_role = Roles.member
+    self.timeout_role = Roles.timeout
     self.logger_webhook = Webhooks.moderation
     self.management_channel = Channels.management
 
@@ -88,6 +90,14 @@ class Staff(commands.Cog):
     )
     self.parsers['ban'] = ban
 
+    timeout = subparsers.add_parser(
+        'timeout', help='timeout a user', parents=[action_parser]
+    )
+    timeout.add_argument(
+        'users', type=str, nargs='+', help='user IDs, names or tags'
+    )
+    self.parsers['timeout'] = timeout
+
     role = subparsers.add_parser(
         'role', help='toggle a role', parents=[action_parser]
     )
@@ -105,6 +115,12 @@ class Staff(commands.Cog):
     if type(self.staff_role) is int:
       self.staff_role = guild.get_role(self.staff_role)
 
+    if type(self.default_role) is int:
+      self.default_role = guild.get_role(self.default_role)
+
+    if type(self.timeout_role) is int:
+      self.timeout_role = guild.get_role(self.timeout_role)
+
     if type(self.management_channel) is int:
       self.management_channel = guild.get_channel(self.management_channel)
 
@@ -113,13 +129,19 @@ class Staff(commands.Cog):
   def in_management(self, ctx):
     return ctx.channel.id == self.management_channel.id
 
-  async def cog_check(self, ctx):
-    if ctx.author.id == ctx.guild.owner_id:
+  def is_staff(self, ctx, user):
+    if user.id == ctx.guild.owner_id:
       return True
 
-    for role in ctx.author.roles:
+    for role in user.roles:
       if role.id in self.required_roles:
         return True
+    
+    return False
+
+  async def cog_check(self, ctx):
+    if self.is_staff(ctx, ctx.author):
+      return True
 
     raise commands.MissingAnyRole(self.required_roles)
 
@@ -197,6 +219,61 @@ class Staff(commands.Cog):
 
   @user_ban.error
   async def user_ban_err(self, ctx, err):
+    channel = ctx.channel
+    if not self.in_management(ctx):
+      channel = self.management_channel
+
+    if isinstance(err, commands.MissingAnyRole) \
+      or isinstance(err, commands.MissingPermissions):
+      return
+
+    return await channel.send(f'{ctx.author.mention}\n```bash\n{err}```')
+
+  @user.command(name='timeout', aliases=['mute'])
+  @commands.cooldown(rate=12, per=3600, type=commands.BucketType.member)
+  async def user_timeout(self, ctx, *, cmd: shlex.split = ''):
+    """Timeout users."""
+    args = ctx.parser.parse_known_args(cmd)[0]
+
+    users = []
+    for user_str in args.users:
+      try:
+        u = await commands.MemberConverter().convert(ctx, user_str)
+        if not u or u.bot or self.is_staff(ctx, u):
+          raise Exception('invalid user')
+        else:
+          users.append(u)
+      except Exception as err:
+        await self.management_channel.send(
+            f'```bash\nfailed to accept user ({user_str}): {err}```'
+        )
+
+    reason = f'[{ctx.author}] “{args.reason}”'
+
+    logentry = discord.Embed(timestamp=ctx.message.created_at)
+    logentry.set_author(name=ctx.author, icon_url=ctx.author.avatar_url)
+
+    for user in users:
+      try:
+        if self.timeout_role in user.roles:
+          await user.remove_roles(self.timeout_role, reason=reason)
+          await user.add_roles(self.default_role, reason=reason)
+          logentry.colour = discord.Colour.green()
+          logentry.description = f'{ctx.author.mention} untimed out ({user}) “{args.reason}”'
+          await self.logger_webhook.send(embed=logentry)
+        else:
+          await user.remove_roles(self.default_role, reason=reason)
+          await user.add_roles(self.timeout_role, reason=reason)
+          logentry.colour = discord.Colour.orange()
+          logentry.description = f'{ctx.author.mention} timed out ({user}) “{args.reason}”'
+          await self.logger_webhook.send(embed=logentry)
+      except Exception as err:
+        await self.management_channel.send(
+            f'```bash\nfailed to timeout user ({user}): {err}```'
+        )
+
+  @user_timeout.error
+  async def user_timeout_err(self, ctx, err):
     channel = ctx.channel
     if not self.in_management(ctx):
       channel = self.management_channel
