@@ -3,6 +3,7 @@ import shlex
 
 import discord
 from discord.ext import commands
+from discord.ext.commands import Cog
 
 from params import Roles, Webhooks, Channels
 
@@ -47,13 +48,7 @@ class Staff(commands.Cog):
   def __init__(self, bot):
     self.bot = bot
 
-    self.staff_role = Roles.staff
-    self.required_roles = Roles.helpers
-    self.default_role = Roles.member
-    self.timeout_role = Roles.timeout
-    self.logger_webhook = Webhooks.moderation
-    self.management_channel = Channels.management
-
+    self.watched_channels = Channels.watched
     self.proficiency_roles = Roles.group_proficiency
     self.dialect_roles = Roles.group_dialect
     self.enabled_roles = Roles.group_dialect + Roles.group_proficiency + Roles.group_normal
@@ -105,26 +100,62 @@ class Staff(commands.Cog):
     role.add_argument('role', type=str, help='role ID or name')
     self.parsers['role'] = role
 
-  @commands.Cog.listener()
+  @Cog.listener()
   async def on_ready(self):
     guild = self.bot.main_guild
 
-    if type(self.logger_webhook) is int:
-      self.logger_webhook = await self.bot.fetch_webhook(self.logger_webhook)
+    if not hasattr(self, 'logger_webhook') or not self.logger_webhook:
+      self.logger_webhook = await self.bot.fetch_webhook(Webhooks.moderation)
 
-    if type(self.staff_role) is int:
-      self.staff_role = guild.get_role(self.staff_role)
+    if not hasattr(self, 'mod_roles') or not self.mod_roles:
+      self.mod_roles = set(
+          r for id in Roles.helpers if (r := guild.get_role(id))
+      )
+      self.mod_role_ids = (r.id for r in self.mod_roles)
 
-    if type(self.default_role) is int:
-      self.default_role = guild.get_role(self.default_role)
+    if not hasattr(self, 'staff_role') or not self.staff_role:
+      self.staff_role = guild.get_role(Roles.staff)
 
-    if type(self.timeout_role) is int:
-      self.timeout_role = guild.get_role(self.timeout_role)
+    if not hasattr(self, 'default_role') or not self.default_role:
+      self.default_role = guild.get_role(Roles.member)
 
-    if type(self.management_channel) is int:
-      self.management_channel = guild.get_channel(self.management_channel)
+    if not hasattr(self, 'timeout_role') or not self.timeout_role:
+      self.timeout_role = guild.get_role(Roles.timeout)
+
+    if not hasattr(self, 'management_channel') or not self.management_channel:
+      self.management_channel = guild.get_channel(Channels.management)
 
     print('→ staff module ready')
+
+  @Cog.listener(name='on_message')
+  async def on_staff_request(self, message):
+    guild = self.bot.main_guild
+
+    if message.channel.id not in self.watched_channels:
+      return
+
+    if not any(r.id == self.staff_role.id for r in message.role_mentions):
+      return
+
+    idle_staff = set(
+        m for r in self.mod_roles
+        for m in r.members if self.staff_role not in m.roles
+    )
+
+    if self.staff_role not in guild.owner.roles:
+      idle_staff.add(guild.owner)
+
+    log = discord.Embed(
+        description=
+        f'{message.author.mention} requested the {self.staff_role.mention}: [jump to message]({message.jump_url})',
+        timestamp=message.created_at,
+        colour=discord.Colour.green()
+    )
+    log.set_author(name=message.author, icon_url=message.author.avatar_url)
+
+    return await self.logger_webhook.send(
+        content=', '.join(m.mention for m in idle_staff), embed=log
+    )
 
   def in_management(self, ctx):
     return ctx.channel.id == self.management_channel.id
@@ -134,16 +165,16 @@ class Staff(commands.Cog):
       return True
 
     for role in user.roles:
-      if role.id in self.required_roles:
+      if role.id in self.mod_role_ids:
         return True
-    
+
     return False
 
   async def cog_check(self, ctx):
     if self.is_staff(ctx, ctx.author):
       return True
 
-    raise commands.MissingAnyRole(self.required_roles)
+    raise commands.MissingAnyRole(self.mod_role_ids)
 
   async def cog_before_invoke(self, ctx):
     if ctx.command and ctx.command.name in self.parsers:
