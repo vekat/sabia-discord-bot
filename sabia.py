@@ -1,6 +1,9 @@
 import discord
 from discord.ext.commands import Bot, MinimalHelpCommand
 
+intents = discord.Intents.default()
+intents.members = True
+
 import params
 
 
@@ -33,6 +36,7 @@ class Sabia(Bot):
 if __name__ == '__main__':
   bot = Sabia(
       command_prefix='$',
+      intents=intents,
       help_command=MinimalHelpCommand(),
       activity=discord.Activity(
           name='The 7th Element', type=discord.ActivityType.listening
