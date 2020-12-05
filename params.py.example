@@ -1,0 +1,32 @@
+# example configuration file with current required parameters.
+# copy this file as `params.py` and provide the required data.
+
+# discord bot token
+token = ''
+# guild id
+guild = 0
+
+class Roles:
+  # management level 1 ids
+  managers = [0]
+  # management level 2 ids
+  helpers = [0]
+  # management notify id
+  staff = 0
+  # default and muted ids
+  member = 0
+  timeout = 0
+  # thematic role ids
+  group_proficiency = [0]
+  group_dialect = [0]
+  group_normal = [0]
+
+class Webhooks:
+  # management action logs
+  moderation = 0
+
+class Channels:
+  # management commands id
+  management = 0
+  # managed (public) ids
+  watched = [0]
