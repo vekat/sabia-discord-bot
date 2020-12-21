@@ -109,9 +109,9 @@ class Staff(commands.Cog):
 
     if not hasattr(self, 'mod_roles') or not self.mod_roles:
       self.mod_roles = set(
-          r for id in Roles.helpers if (r := guild.get_role(id))
+          [r for rid in Roles.helpers if (r := guild.get_role(rid))]
       )
-      self.mod_role_ids = (r.id for r in self.mod_roles)
+      self.mod_role_ids = [r.id for r in self.mod_roles]
 
     if not hasattr(self, 'staff_role') or not self.staff_role:
       self.staff_role = guild.get_role(Roles.staff)
