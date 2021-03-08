@@ -16,6 +16,8 @@ class Roles:
   # default and muted ids
   member = 0
   timeout = 0
+  # default proficiency role id
+  nolevel = 0
   # thematic role ids
   group_proficiency = [0]
   group_dialect = [0]

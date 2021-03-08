@@ -122,6 +122,9 @@ class Staff(commands.Cog):
     if not hasattr(self, 'timeout_role') or not self.timeout_role:
       self.timeout_role = guild.get_role(Roles.timeout)
 
+    if not hasattr(self, 'nolevel_role') or not self.nolevel_role:
+      self.nolevel_role = guild.get_role(Roles.nolevel)
+
     if not hasattr(self, 'management_channel') or not self.management_channel:
       self.management_channel = guild.get_channel(Channels.management)
 
@@ -352,6 +355,8 @@ class Staff(commands.Cog):
         roles_action = 'removed'
         roles_to_remove.append(role)
         logentry.colour = discord.Colour.orange()
+        if role.id in self.proficiency_roles:
+          roles_to_add.append(self.nolevel_role)
         break
     else:
       roles_to_add.append(role)
@@ -359,6 +364,8 @@ class Staff(commands.Cog):
         for user_role in user.roles:
           if user_role.id in self.proficiency_roles:
             roles_to_remove.append(user_role)
+        if self.nolevel_role in user.roles:
+          roles_to_remove.append(self.nolevel_role)
 
     logentry.description = f'{ctx.author.mention} {roles_action} role ({user}, {role}) “{args.reason}”'
 
