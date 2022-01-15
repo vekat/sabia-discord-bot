@@ -140,10 +140,8 @@ class Staff(commands.Cog):
     if not any(r.id == self.staff_role.id for r in message.role_mentions):
       return
 
-    idle_staff = set(
-        m for r in self.mod_roles
-        for m in r.members if self.staff_role not in m.roles
-    )
+    staff_members = [m for r in self.mod_roles for m in r.members]
+    idle_staff = set([m for m in staff_members if self.staff_role not in m.roles])
 
     if self.staff_role not in guild.owner.roles:
       idle_staff.add(guild.owner)
